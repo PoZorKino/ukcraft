@@ -1,5 +1,7 @@
 namespace UKCraft;
 
+using System.Collections.Generic;
+using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 
@@ -41,12 +43,15 @@ public static class TntHitPatch
 }
 
 /// <summary> A world you can blow holes in makes any time or score meaningless, so nothing is sent to the leaderboards while the mod is loaded. </summary>
-[HarmonyPatch(typeof(LeaderboardController))]
+[HarmonyPatch]
 public static class LeaderboardPatch
 {
-    [HarmonyPrefix]
-    [HarmonyPatch(nameof(LeaderboardController.SubmitLevelScore))]
-    [HarmonyPatch(nameof(LeaderboardController.SubmitCyberGrindScore))]
-    [HarmonyPatch(nameof(LeaderboardController.SubmitFishSize))]
-    private static bool Block() => false;
+    private static IEnumerable<MethodBase> TargetMethods()
+    {
+        yield return AccessTools.Method(typeof(LeaderboardController), nameof(LeaderboardController.SubmitLevelScore));
+        yield return AccessTools.Method(typeof(LeaderboardController), nameof(LeaderboardController.SubmitCyberGrindScore));
+        yield return AccessTools.Method(typeof(LeaderboardController), nameof(LeaderboardController.SubmitFishSize));
+    }
+
+    private static bool Prefix() => false;
 }

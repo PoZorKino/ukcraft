@@ -23,6 +23,7 @@ public static class LevelCarver
     private static float renderersTime = -100f;
 
     public static int Carves, TrianglesCut;
+    private static int skipLogs;
 
     public static void Reset()
     {
@@ -39,23 +40,13 @@ public static class LevelCarver
 
     #region entry
 
-    private static HashSet<Vector3Int> cells;
-    private static Vector3 bmin, bmax;
-    private static float S;
-
     public static void Carve(HashSet<Vector3Int> destroyed)
     {
         if (destroyed.Count == 0) return;
         var watch = System.Diagnostics.Stopwatch.StartNew();
 
-        cells = destroyed;
-        S = VoxelWorld.S;
-        var lo = new Vector3Int(int.MaxValue, int.MaxValue, int.MaxValue);
-        var hi = new Vector3Int(int.MinValue, int.MinValue, int.MinValue);
-        foreach (var c in destroyed) { lo = Vector3Int.Min(lo, c); hi = Vector3Int.Max(hi, c); }
-        bmin = (Vector3)lo * S;
-        bmax = (Vector3)(hi + Vector3Int.one) * S;
-        var bounds = new Bounds((bmin + bmax) * 0.5f, bmax - bmin);
+        Cutter.Begin(destroyed, VoxelWorld.S);
+        var bounds = new Bounds((Cutter.Min + Cutter.Max) * 0.5f, Cutter.Max - Cutter.Min);
 
         int cut = 0, objects = 0;
 
@@ -190,7 +181,11 @@ public static class LevelCarver
                     if (opt.staticMRends[i] != null) bakedSubMesh[opt.staticMRends[i]] = opt.bakedDataAsset.firstSubMesh[i];
             }
         }
-        if (!bakedSubMesh.TryGetValue(mr, out int sub) || sub < 0 || sub >= baked.subMeshCount) return null;
+        if (!bakedSubMesh.TryGetValue(mr, out int sub) || sub < 0 || sub >= baked.subMeshCount)
+        {
+            if (skipLogs++ < 12) Plugin.Log.LogInfo($"can't carve '{mr.name}': static batch '{baked.name}' with no known sub-mesh");
+            return null;
+        }
 
         if (!bakedCopies.TryGetValue(baked, out var copy))
         {
@@ -348,87 +343,6 @@ public static class LevelCarver
     #endregion
     #region cutting
 
-    /// <summary> Corner of a polygon being cut: where it is in the world and where it is on the original triangle. </summary>
-    private struct PV
-    {
-        public Vector3 p, w;
-    }
-
-    private static readonly List<PV> polyA = new(), polyB = new(), polyC = new();
-    private static readonly List<List<PV>> kept = new();
-    private static readonly Stack<List<PV>> pool = new();
-
-    private static List<PV> Rent()
-    {
-        var l = pool.Count > 0 ? pool.Pop() : new List<PV>(8);
-        l.Clear();
-        return l;
-    }
-
-    /// <summary> Splits a convex polygon by the plane axis = value into the part below and the part above. </summary>
-    private static void Split(List<PV> poly, int axis, float value, List<PV> below, List<PV> above)
-    {
-        below.Clear(); above.Clear();
-        int n = poly.Count;
-        for (int i = 0; i < n; i++)
-        {
-            PV a = poly[i], b = poly[(i + 1) % n];
-            float da = a.p[axis] - value, db = b.p[axis] - value;
-            if (da >= 0f) above.Add(a); else below.Add(a);
-            if ((da >= 0f) != (db >= 0f))
-            {
-                float t = da / (da - db);
-                var m = new PV { p = Vector3.LerpUnclamped(a.p, b.p, t), w = Vector3.LerpUnclamped(a.w, b.w, t) };
-                m.p[axis] = value;
-                above.Add(m); below.Add(m);
-            }
-        }
-        if (above.Count < 3) above.Clear();
-        if (below.Count < 3) below.Clear();
-    }
-
-    private static void Keep(List<PV> poly)
-    {
-        if (poly.Count < 3) return;
-        var copy = Rent();
-        copy.AddRange(poly);
-        kept.Add(copy);
-    }
-
-    /// <summary> Slices the polygon along every grid plane of the given axis and the ones after it; returns true if a piece was destroyed. </summary>
-    private static bool Slice(List<PV> poly, int axis, Vector3 normal)
-    {
-        if (poly.Count < 3) return false;
-        if (axis == 3)
-        {
-            var center = Vector3.zero;
-            foreach (var v in poly) center += v.p;
-            center = center / poly.Count - normal * 0.02f;
-            if (cells.Contains(VoxelWorld.CellAt(center))) return true;
-            Keep(poly);
-            return false;
-        }
-
-        float lo = float.MaxValue, hi = float.MinValue;
-        foreach (var v in poly) { lo = Mathf.Min(lo, v.p[axis]); hi = Mathf.Max(hi, v.p[axis]); }
-
-        bool removed = false;
-        var rest = Rent();
-        rest.AddRange(poly);
-        var below = Rent();
-        var above = Rent();
-        for (int k = Mathf.FloorToInt(lo / S) + 1; k * S < hi - 0.0001f && rest.Count >= 3; k++)
-        {
-            Split(rest, axis, k * S, below, above);
-            removed |= Slice(below, axis + 1, normal);
-            rest.Clear();
-            rest.AddRange(above);
-        }
-        removed |= Slice(rest, axis + 1, normal);
-        pool.Push(rest); pool.Push(below); pool.Push(above);
-        return removed;
-    }
-
     /// <summary> Cuts the destroyed cells out of a mesh in place. Returns how many triangles were cut. </summary>
     private static int CarveMesh(Mesh mesh, Matrix4x4 toWorld, bool positionsOnly)
     {
@@ -438,6 +352,8 @@ public static class LevelCarver
 
         var world = new Vector3[original];
         for (int i = 0; i < original; i++) world[i] = toWorld.MultiplyPoint3x4(data.pos[i]);
+
+        Cutter.Mirrored = toWorld.determinant < 0f;
 
         int cut = 0;
         for (int s = 0; s < mesh.subMeshCount; s++)
@@ -451,39 +367,14 @@ public static class LevelCarver
                 int a = src[i], b = src[i + 1], c = src[i + 2];
                 Vector3 pa = world[a], pb = world[b], pc = world[c];
 
-                if (Mathf.Max(pa.x, Mathf.Max(pb.x, pc.x)) < bmin.x || Mathf.Min(pa.x, Mathf.Min(pb.x, pc.x)) > bmax.x ||
-                    Mathf.Max(pa.y, Mathf.Max(pb.y, pc.y)) < bmin.y || Mathf.Min(pa.y, Mathf.Min(pb.y, pc.y)) > bmax.y ||
-                    Mathf.Max(pa.z, Mathf.Max(pb.z, pc.z)) < bmin.z || Mathf.Min(pa.z, Mathf.Min(pb.z, pc.z)) > bmax.z)
-                {
-                    dst.Add(a); dst.Add(b); dst.Add(c);
-                    continue;
-                }
-
-                var normal = Vector3.Cross(pb - pa, pc - pa).normalized;
-                foreach (var l in kept) pool.Push(l);
-                kept.Clear();
-
-                // peel off whatever sticks out of the box around the destroyed cells
-                polyA.Clear();
-                polyA.Add(new PV { p = pa, w = new Vector3(1, 0, 0) });
-                polyA.Add(new PV { p = pb, w = new Vector3(0, 1, 0) });
-                polyA.Add(new PV { p = pc, w = new Vector3(0, 0, 1) });
-                for (int axis = 0; axis < 3 && polyA.Count >= 3; axis++)
-                {
-                    Split(polyA, axis, bmin[axis], polyB, polyC);
-                    Keep(polyB);
-                    Split(polyC, axis, bmax[axis], polyA, polyB);
-                    Keep(polyB);
-                }
-
-                if (polyA.Count < 3 || !Slice(polyA, 0, normal))
+                if (!Cutter.Near(pa, pb, pc) || !Cutter.Cut(pa, pb, pc))
                 {
                     dst.Add(a); dst.Add(b); dst.Add(c);
                     continue;
                 }
 
                 cut++;
-                foreach (var poly in kept)
+                foreach (var poly in Cutter.Kept)
                 {
                     int first = data.Blend(a, b, c, poly[0].w);
                     int prev = data.Blend(a, b, c, poly[1].w);

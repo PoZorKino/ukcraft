@@ -16,7 +16,7 @@ public class Plugin : BaseUnityPlugin
     public static ManualLogSource Log;
 
     public static ConfigEntry<float> BlockSize, Reach, TntRadius, CreeperRadius, ExplosionCarveScale, TntFuse;
-    public static ConfigEntry<bool> AllExplosionsDestroy, DestroyLevel, MineLevel;
+    public static ConfigEntry<bool> AllExplosionsDestroy, DestroyLevel, MineLevel, LitByLevel;
     public static ConfigEntry<UnityEngine.InputSystem.Key> BuildKey;
 
     private void Awake()
@@ -25,6 +25,7 @@ public class Plugin : BaseUnityPlugin
         Log = Logger;
 
         BlockSize = Config.Bind("World", "BlockSize", 2f, "Edge length of one block in game units. V1 is about 1.75 blocks tall at 2.");
+        LitByLevel = Config.Bind("World", "LitByLevel", false, "Blocks are lit by the level's lights instead of being evenly bright. Dark rooms make dark blocks.");
         Reach = Config.Bind("World", "Reach", 14f, "How far you can place and break blocks, in game units.");
         BuildKey = Config.Bind("Controls", "BuildKey", UnityEngine.InputSystem.Key.B, "Toggles build mode.");
         TntRadius = Config.Bind("Explosions", "TntRadius", 4f, "TNT crater radius in blocks.");

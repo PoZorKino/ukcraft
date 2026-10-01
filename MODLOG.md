@@ -31,12 +31,31 @@ Pattern 1 (port the content) as a BepInEx 5 plugin, C#, Harmony. All textures ar
   `Commands.cs` test channel (`BepInEx/config/ukcraft.cmd`, one command per line), `Probe.cs` scene dump.
 - Build: `dotnet build UKCraft.csproj -c Release` -> `bin/Release/netstandard2.1/UKCraft.dll` (only that one file ships).
 
+## Shader (read from the game's asset bundles with UnityPy, 2026-10-01)
+- Level shader is `ULTRAKILL/Master` (in `StreamingAssets/aa/StandaloneWindows64/assets_assets_assets/shaders.bundle`), one pass, LIGHTMODE Vertex.
+  Most materials use keywords `VERTEX_LIGHTING _FOG_ON` (1177 of 2144); `_FOG_ON` alone exists too (43). Props: `_MainTex`, `_Color`,
+  `_VertexColors` (default 1), `_CullMode` 2, `_ZWrite` 1.
+- Block material = Master + `_FOG_ON` (+ `VERTEX_LIGHTING` if config LitByLevel). Fallback `Unlit/Texture` (it is in resources.assets).
+- Stencil is only set for layer 24 (Outdoors) by `StencilValuesByLayer`; blocks are on layer 8.
+
+## Tests
+- `tests/CutterTest` (`dotnet run -c Release`): runs the real `src/Cutter.cs` against stand-in Vector3 types. Checks hole area on a
+  floor lying on a grid plane, floor/ceiling ownership, and 400 random triangles against point sampling. Found and fixed one bug
+  (surface exactly on the outer face of the blast box was never cut -> box now has a 0.05 margin).
+
+## Install state (2026-10-01)
+- User chose "install, I'll test myself": do NOT launch or drive the game unless they say so.
+- BepInEx 5.4.23.5 x64 unzipped into the game folder (winhttp.dll, doorstop_config.ini, .doorstop_version, changelog.txt, BepInEx/).
+- Plugin at `BepInEx/plugins/UKCraft/UKCraft.dll`. Redeploy: `sh tools/deploy.sh`.
+- Uninstall: delete those five items from the game folder.
+- Log to read after a session: `<game>/BepInEx/LogOutput.log` (lines "carved N cells: ...", "can't carve ...", exceptions).
+
 ## Status
-- [x] compiles (0 warnings)
-- [ ] install BepInEx + plugin (waiting for user OK)
-- [ ] in game: plugin loads, Harmony patches apply
+- [x] compiles (0 warnings), cutter unit test passes
+- [x] BepInEx + plugin installed
+- [ ] in game (user testing): plugin loads, Harmony patches apply
 - [ ] in game: blocks render with the master shader, place/break
 - [ ] in game: TNT, chain reaction, crater in blocks
-- [ ] in game: crater in level geometry (run `probe` first: readable meshes? static batch?)
+- [ ] in game: crater in level geometry (static-batched renderers are the uncertain part; `probe` command dumps the scene)
 - [ ] in game: creeper walks, fuses, explodes
 - [ ] showcase clip, README, package

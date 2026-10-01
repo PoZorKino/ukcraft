@@ -1,5 +1,7 @@
 namespace UKCraft;
 
+using System.Collections.Generic;
+using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 
@@ -150,12 +152,15 @@ public class Creeper : MonoBehaviour
 }
 
 /// <summary> A creeper never bites or dives: the Filth underneath only walks. </summary>
-[HarmonyPatch(typeof(ZombieMelee))]
+[HarmonyPatch]
 public static class CreeperPatch
 {
-    [HarmonyPrefix]
-    [HarmonyPatch("DiveCheck")]
-    [HarmonyPatch(nameof(ZombieMelee.JumpAttack))]
-    [HarmonyPatch(nameof(ZombieMelee.Swing))]
-    private static bool NoAttack(ZombieMelee __instance) => __instance.GetComponent<Creeper>() == null;
+    private static IEnumerable<MethodBase> TargetMethods()
+    {
+        yield return AccessTools.Method(typeof(ZombieMelee), "DiveCheck");
+        yield return AccessTools.Method(typeof(ZombieMelee), nameof(ZombieMelee.JumpAttack));
+        yield return AccessTools.Method(typeof(ZombieMelee), nameof(ZombieMelee.Swing));
+    }
+
+    private static bool Prefix(ZombieMelee __instance) => __instance.GetComponent<Creeper>() == null;
 }

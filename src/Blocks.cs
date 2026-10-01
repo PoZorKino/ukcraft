@@ -378,10 +378,20 @@ public static class Blocks
             if (blockMat != null) return blockMat;
             Build();
 
+            // the game's own level shader: fog and the PSX look match the level around the blocks
             var refs = MonoSingleton<DefaultReferenceManager>.Instance;
-            var shader = refs != null && refs.masterShader != null ? refs.masterShader : Shader.Find("Unlit/Texture");
+            var shader = refs != null ? refs.masterShader : null;
+            if (shader == null) shader = Shader.Find("ULTRAKILL/Master");
+            bool master = shader != null;
+            if (!master) shader = Shader.Find("Unlit/Texture");
+
             blockMat = new Material(shader) { name = "UKCraft blocks", mainTexture = Atlas };
-            if (blockMat.HasProperty("_Color")) blockMat.SetColor("_Color", Color.white);
+            if (master)
+            {
+                blockMat.SetColor("_Color", Color.white);
+                blockMat.EnableKeyword("_FOG_ON");
+                if (Plugin.LitByLevel.Value) blockMat.EnableKeyword("VERTEX_LIGHTING");
+            }
             Object.DontDestroyOnLoad(blockMat);
             return blockMat;
         }
